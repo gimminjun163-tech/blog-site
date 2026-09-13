@@ -108,6 +108,44 @@
             color: white;
             border-color: var(--primary);
         }
+
+        /* 글 목록 페이지네이션 (첫/이전/숫자/다음/끝) */
+        .list-pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 4px;
+            margin-top: 20px;
+        }
+        .list-page-btn {
+            min-width: 32px;
+            height: 32px;
+            padding: 0 8px;
+            border: none;
+            background: transparent;
+            color: #555;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .list-page-btn:hover:not(:disabled) { background: #eef2f7; }
+        .list-page-btn:disabled { color: #ccc; cursor: not-allowed; }
+        .list-page-btn.active {
+            background: var(--primary);
+            color: white;
+            font-weight: bold;
+        }
+        .category-badge {
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            background: #eef2f7;
+            color: #555;
+            font-weight: bold;
+        }
         #rank-page table { margin-top: 20px; }
         .rank-1 { color: #ffd700; font-weight: bold; } /* 금메달 */
         .rank-2 { color: #c0c0c0; font-weight: bold; } /* 은메달 */
@@ -151,6 +189,13 @@
 
                 <!-- 검색 바 -->
                 <div class="search-container">
+                    <select id="category-filter" onchange="filterByCategory()">
+                        <option value="all">전체</option>
+                        <option value="코딩">코딩</option>
+                        <option value="글쓰기">글쓰기</option>
+                        <option value="일기">일기</option>
+                        <option value="상탄거">상탄거</option>
+                    </select>
                     <select id="search-type">
                         <option value="title">제목</option>
                         <option value="author">작성자</option>
@@ -162,9 +207,10 @@
                 </div>
 
                 <table>
-                    <thead><tr><th>유형</th><th>제목</th><th>작성자</th><th>좋아요</th><th>날짜</th></tr></thead>
+                    <thead><tr><th>유형</th><th>카테고리</th><th>제목</th><th>작성자</th><th>좋아요</th><th>날짜</th></tr></thead>
                     <tbody id="post-list"></tbody>
                 </table>
+                <div id="list-pagination" class="list-pagination"></div>
             </div>
 
             <!-- 2. 글쓰기/수정 페이지 -->
@@ -173,6 +219,15 @@
                 <div id="notice-option-wrapper" class="hidden">
                     <label>분류</label>
                     <select id="post-type"><option value="normal">일반</option><option value="notice">공지사항</option></select>
+                </div>
+                <div style="margin-top: 15px;">
+                    <label>카테고리</label>
+                    <select id="post-category">
+                        <option value="코딩">코딩</option>
+                        <option value="글쓰기">글쓰기</option>
+                        <option value="일기">일기</option>
+                        <option value="상탄거">상탄거</option>
+                    </select>
                 </div>
                 <div style="margin-top: 15px;"><label>제목</label><input type="text" id="post-title" placeholder="제목을 입력하세요"></div>
                 <div style="margin-top: 15px;">
@@ -283,28 +338,36 @@
     let isLoginMode = true;
     let currentIdx = null;
     let isEditMode = false;
-    // --- 검색 기능 ---
-    function searchPosts() {
+    // --- 검색 & 카테고리 필터 기능 ---
+    function applyFilters(page = 1) {
+        const category = document.getElementById('category-filter').value;
         const type = document.getElementById('search-type').value;
         const query = document.getElementById('search-input').value.toLowerCase().trim();
-        
-        if(!query) {
-            renderList(posts);
-            return;
+
+        let filtered = posts;
+
+        if(category !== 'all') {
+            filtered = filtered.filter(p => p.category === category);
         }
 
-        const filtered = posts.filter(p => {
-            if(type === 'title') return p.title.toLowerCase().includes(query);
-            if(type === 'author') return p.author.toLowerCase().includes(query);
-            if(type === 'content') return p.content.toLowerCase().includes(query);
-        });
+        if(query) {
+            filtered = filtered.filter(p => {
+                if(type === 'title') return p.title.toLowerCase().includes(query);
+                if(type === 'author') return p.author.toLowerCase().includes(query);
+                if(type === 'content') return p.content.toLowerCase().includes(query);
+            });
+        }
 
-        renderList(filtered);
+        renderList(filtered, page);
     }
+
+    function filterByCategory() { applyFilters(1); }
+
+    function searchPosts() { applyFilters(1); }
 
     function resetSearch() {
         document.getElementById('search-input').value = '';
-        renderList(posts);
+        applyFilters(1);
     }
 
     // --- 작성자 통계 기능 ---
@@ -484,19 +547,34 @@
         }); 
     }
     
-    function showListPage() { hidePages(); document.getElementById('list-page').classList.remove('hidden'); renderList(posts); }
+    function showListPage() { hidePages(); document.getElementById('list-page').classList.remove('hidden'); applyFilters(currentListPage); }
 
-    function renderList(dataToRender) {
+    let currentListPage = 1; // 현재 목록 페이지 번호
+    const LIST_PER_PAGE = 5; // 페이지당 게시글 수
+    let activeListData = posts; // 현재 필터가 적용된 전체 데이터(페이지네이션 전)
+
+    function renderList(dataToRender, page = 1) {
+        activeListData = dataToRender;
         const tbody = document.getElementById('post-list');
         tbody.innerHTML = '';
-        // 공지 우선 정렬
+        // 공지 우선 정렬 (최신순은 posts 배열 자체가 새 글을 맨 앞에 추가하므로 자연히 유지됨)
         const sorted = [...dataToRender].sort((a,b) => (a.type === 'notice' ? -1 : 1));
-        sorted.forEach(p => {
+
+        const totalPages = Math.max(1, Math.ceil(sorted.length / LIST_PER_PAGE));
+        if(page > totalPages) page = totalPages;
+        if(page < 1) page = 1;
+        currentListPage = page;
+
+        const startIdx = (page - 1) * LIST_PER_PAGE;
+        const pageData = sorted.slice(startIdx, startIdx + LIST_PER_PAGE);
+
+        pageData.forEach(p => {
             const idx = posts.indexOf(p);
             const isWithdrawn = !users.find(u => u.id === p.author) && p.author !== 'admin';
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><span class="badge ${p.type === 'notice' ? 'badge-notice' : 'badge-normal'}">${p.type === 'notice' ? '공지' : '일반'}</span></td>
+                <td><span class="category-badge">${p.category || '-'}</span></td>
                 <td><a href="#" onclick="viewPost(${idx})">${p.title} <small>[${p.comments?p.comments.length:0}]</small></a></td>
                 <td><span class="author-link" onclick="showStats('${p.author}')">${isWithdrawn?'(탈퇴)'+p.author:p.author}</span></td>
                 <td style="color:var(--like)">♥ ${p.likes?p.likes.length:0}</td>
@@ -504,6 +582,40 @@
             `;
             tbody.appendChild(tr);
         });
+
+        renderListPagination(totalPages, currentListPage);
+    }
+
+    function renderListPagination(total, current) {
+        const container = document.getElementById('list-pagination');
+        container.innerHTML = '';
+        if(total <= 1) return;
+
+        const makeBtn = (label, targetPage, disabled) => {
+            const btn = document.createElement('button');
+            btn.innerText = label;
+            btn.className = 'list-page-btn';
+            if(disabled) { btn.disabled = true; }
+            else { btn.onclick = () => renderList(activeListData, targetPage); }
+            return btn;
+        };
+
+        // [처음] [이전]
+        container.appendChild(makeBtn('|←', 1, current === 1));
+        container.appendChild(makeBtn('<', current - 1, current === 1));
+
+        // 숫자 버튼
+        for(let i = 1; i <= total; i++) {
+            const btn = document.createElement('button');
+            btn.innerText = i;
+            btn.className = `list-page-btn ${i === current ? 'active' : ''}`;
+            btn.onclick = () => renderList(activeListData, i);
+            container.appendChild(btn);
+        }
+
+        // [다음] [끝]
+        container.appendChild(makeBtn('>', current + 1, current === total));
+        container.appendChild(makeBtn('→|', total, current === total));
     }
 
     function showWritePage() {
@@ -514,6 +626,7 @@
         document.getElementById('post-title').value = '';
         document.getElementById('post-content-editable').innerHTML = '';
         document.getElementById('post-code').value = '';
+        document.getElementById('post-category').value = '코딩';
         document.getElementById('notice-option-wrapper').classList.toggle('hidden', currentUser.id !== 'admin');
     }
 
@@ -527,6 +640,7 @@
         document.getElementById('post-title').value = p.title;
         document.getElementById('post-content-editable').innerHTML = p.content;
         document.getElementById('post-code').value = p.code || '';
+        document.getElementById('post-category').value = p.category || '코딩';
         document.getElementById('notice-option-wrapper').classList.toggle('hidden', currentUser.id !== 'admin');
         if(currentUser.id === 'admin') document.getElementById('post-type').value = p.type;
     }
@@ -536,13 +650,15 @@
         const content = document.getElementById('post-content-editable').innerHTML;
         const code = document.getElementById('post-code').value.trim();
         const type = currentUser.id === 'admin' ? document.getElementById('post-type').value : 'normal';
+        const category = document.getElementById('post-category').value;
 
         if(!title || !content.replace(/<br>|&nbsp;/g, '').trim()) return alert("제목과 내용을 모두 입력하세요.");
 
         if(isEditMode) {
-            posts[currentIdx] = { ...posts[currentIdx], title, content, code, type };
+            posts[currentIdx] = { ...posts[currentIdx], title, content, code, type, category };
         } else {
-            posts.push({ type, title, content, code, author: currentUser.id, date: new Date().toLocaleDateString(), likes: [], comments: [] });
+            // 새 글은 맨 앞(처음 인덱스)에 추가되어 목록 위쪽에서부터 늘어남
+            posts.unshift({ type, category, title, content, code, author: currentUser.id, date: new Date().toLocaleDateString(), likes: [], comments: [] });
         }
         saveData(); showListPage();
     }
@@ -713,664 +829,3 @@
 </script>
 </body>
 </html>
-<!-- <!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>최종형 커뮤니티 게시판</title>
-    <style>
-        :root { --primary: #4a90e2; --notice: #e74c3c; --bg: #f0f2f5; --code-bg: #2d3436; --danger: #eb4d4b; --success: #2ecc71; }
-        body { font-family: 'Pretendard', sans-serif; background: var(--bg); margin: 0; padding: 0; }
-        .container { max-width: 900px; margin: 40px auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-        
-        .hidden { display: none !important; }
-        .btn { padding: 8px 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 14px; }
-        .btn-primary { background: var(--primary); color: white; }
-        .btn-danger { background: var(--danger); color: white; }
-        .btn-secondary { background: #636e72; color: white; }
-        .btn-success { background: var(--success); color: white; }
-        
-        input, select, textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; margin-top: 5px; }
-
-        /* 에디터 스타일 */
-        .editor-container { border: 1px solid #ddd; border-radius: 6px; overflow: hidden; }
-        .editor-toolbar { background: #f8f9fa; padding: 8px; border-bottom: 1px solid #ddd; display: flex; gap: 8px; }
-        .editor-btn { background: white; border: 1px solid #ccc; padding: 5px 12px; cursor: pointer; border-radius: 4px; font-size: 13px; }
-        
-        #post-content-editable, #view-content { 
-            width: 100%; min-height: 250px; padding: 15px; 
-            line-height: 1.6; font-size: 15px; color: #333;
-            word-break: break-all; outline: none; box-sizing: border-box;
-        }
-
-        /* 헤더/유저 메뉴 */
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 15px; }
-        .user-menu { display: flex; gap: 10px; align-items: center; }
-
-        /* 테이블 및 디자인 */
-        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-        th, td { padding: 15px; border-bottom: 1px solid #eee; text-align: left; }
-        .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; color: white; font-weight: bold; }
-        .badge-notice { background: var(--notice); }
-        .badge-normal { background: var(--primary); }
-        .author-link { color: var(--primary); cursor: pointer; font-weight: bold; text-decoration: underline; }
-
-        /* 코드 블록 및 복사 버튼 */
-        .code-wrapper { position: relative; margin-top: 20px; }
-        pre { background: var(--code-bg); color: #fab1a0; padding: 15px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; font-family: 'Consolas', monospace; margin: 0; }
-        .copy-btn { position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-        .copy-btn:hover { background: rgba(255,255,255,0.2); }
-
-        #view-content a { color: #007bff; text-decoration: underline; }
-    </style>
-</head>
-<body>
-
-    <div id="auth-section">
-        <div style="max-width: 400px; margin: 100px auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
-            <h2 id="auth-title" style="text-align: center;">커뮤니티 로그인</h2>
-            <input type="text" id="auth-id" placeholder="아이디">
-            <input type="password" id="auth-pw" placeholder="비밀번호">
-            <button class="btn btn-primary" style="width: 100%; margin-top: 20px;" onclick="handleAuth()" id="auth-btn">로그인</button>
-            <p style="text-align: center; margin-top: 15px; cursor: pointer; color: var(--primary);" onclick="toggleAuthMode()" id="auth-toggle-text">처음이신가요? 회원가입</p>
-        </div>
-    </div>
-
-    <div id="app-section" class="hidden">
-        <div class="container">
-            <div class="header">
-                <div>접속: <span id="current-user-display" style="font-weight: bold; color: var(--primary);"></span></div>
-                <div class="user-menu">
-                    <button class="btn btn-secondary" onclick="logout()">로그아웃</button>
-                    <button class="btn btn-danger" onclick="withdrawAccount()" style="font-size: 11px;">회원 탈퇴</button>
-                </div>
-            </div>
-
-            <div id="list-page">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h2>게시글 목록</h2>
-                    <button class="btn btn-primary" onclick="showWritePage()">글쓰기</button>
-                </div>
-                <table>
-                    <thead><tr><th>유형</th><th>제목</th><th>작성자</th><th>날짜</th></tr></thead>
-                    <tbody id="post-list"></tbody>
-                </table>
-            </div>
-
-            <div id="write-page" class="hidden">
-                <h2 id="write-title">새 글 작성</h2>
-                <div id="notice-option-wrapper" class="hidden">
-                    <label>분류</label>
-                    <select id="post-type"><option value="normal">일반</option><option value="notice">공지사항</option></select>
-                </div>
-                <div style="margin-top: 10px;"><label>제목</label><input type="text" id="post-title"></div>
-                <div style="margin-top: 15px;">
-                    <label>본문</label>
-                    <div class="editor-container">
-                        <div class="editor-toolbar">
-                            <button class="editor-btn" onclick="execCmd('bold')">B</button>
-                            <button class="editor-btn" onclick="execCmd('italic')">I</button>
-                            <button class="editor-btn" onclick="execCmd('underline')">U</button>
-                            <button class="editor-btn" onclick="addLink()">링크</button>
-                        </div>
-                        <div id="post-content-editable" contenteditable="true"></div>
-                    </div>
-                </div>
-                <div style="margin-top: 15px;"><label>코드 영역 (선택)</label><textarea id="post-code" style="height: 100px;"></textarea></div>
-                <div style="margin-top: 20px;">
-                    <button class="btn btn-primary" id="save-btn" onclick="savePost()">등록</button>
-                    <button class="btn btn-secondary" onclick="showListPage()">취소</button>
-                </div>
-            </div>
-
-            <div id="view-page" class="hidden">
-                <h2 id="view-title"></h2>
-                <div id="view-info" style="color: #888; font-size: 14px; margin-bottom: 20px;"></div>
-                <div id="view-content" style="border-top: 1px solid #eee; padding-top: 20px;"></div>
-                
-                <div id="view-code-wrapper" class="hidden code-wrapper">
-                    <button class="copy-btn" onclick="copyCode()">코드 복사</button>
-                    <pre><code id="view-code"></code></pre>
-                </div>
-
-                <hr style="margin: 30px 0;">
-                <div style="display: flex; gap: 10px;">
-                    <button class="btn btn-secondary" onclick="showListPage()">목록으로</button>
-                    <button class="btn btn-success hidden" id="edit-btn" onclick="prepareEdit()">수정</button>
-                    <button class="btn btn-danger hidden" id="delete-btn" onclick="deletePost()">삭제</button>
-                </div>
-            </div>
-            <div id="author-page" class="hidden">
-                <h2 id="author-title-text"></h2>
-                <div id="stats-content" style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;"></div>
-                <h3>작성한 글 목록</h3>
-                <table>
-                    <thead><tr><th>유형</th><th>제목</th><th>날짜</th></tr></thead>
-                    <tbody id="author-post-list"></tbody>
-                </table>
-                <button class="btn btn-secondary" onclick="showListPage()">돌아가기</button>
-            </div>
-        </div>
-    </div>
-
-<script>
-    let users = JSON.parse(localStorage.getItem('brd_u_v3')) || [];
-    let posts = JSON.parse(localStorage.getItem('brd_p_v3')) || [];
-    let currentUser = JSON.parse(localStorage.getItem('brd_s_v3'));
-    let isLoginMode = true;
-    let curViewIdx = null; // 현재 보고 있는 글의 인덱스
-    let isEditMode = false; // 수정 모드 여부
-
-    // --- 코드 복사 기능 ---
-    function copyCode() {
-        const codeText = document.getElementById('view-code').innerText;
-        navigator.clipboard.writeText(codeText).then(() => {
-            const btn = document.querySelector('.copy-btn');
-            btn.innerText = "복사 완료!";
-            setTimeout(() => btn.innerText = "코드 복사", 2000);
-        });
-    }
-
-    // --- 수정 준비 기능 ---
-    function prepareEdit() {
-        isEditMode = true;
-        const p = posts[curViewIdx];
-        
-        hidePages();
-        document.getElementById('write-page').classList.remove('hidden');
-        document.getElementById('write-title').innerText = "게시글 수정";
-        document.getElementById('save-btn').innerText = "수정 완료";
-
-        // 기존 값 채우기
-        document.getElementById('post-title').value = p.title;
-        document.getElementById('post-content-editable').innerHTML = p.content;
-        document.getElementById('post-code').value = p.code || '';
-        
-        if(currentUser.id === 'admin') {
-            document.getElementById('notice-option-wrapper').classList.remove('hidden');
-            document.getElementById('post-type').value = p.type;
-        }
-    }
-
-    // --- 회원 탈퇴 ---
-    function withdrawAccount() {
-        if (currentUser.id === 'admin') return alert("관리자는 탈퇴할 수 없습니다.");
-        if (confirm("정말 탈퇴하시겠습니까? 계정 정보가 삭제됩니다.")) {
-            users = users.filter(u => u.id !== currentUser.id);
-            localStorage.setItem('brd_u_v3', JSON.stringify(users));
-            logout();
-        }
-    }
-
-    // --- 서식/링크 로직 ---
-    function execCmd(cmd) { document.execCommand(cmd, false, null); }
-    function addLink() {
-        const url = prompt("URL 입력:", "http://");
-        if(url && url !== "http://") document.execCommand('createLink', false, url);
-    }
-    function smartLinkify(html) {
-        const urlRegex = /(((https?:\/\/)|(www\.))[^\s\t\n<>"\\^`{|}]*)/ig;
-        const div = document.createElement('div');
-        div.innerHTML = html;
-        const walk = document.createTreeWalker(div, NodeFilter.SHOW_TEXT, null, false);
-        let node, targets = [];
-        while(node = walk.nextNode()) { if (node.parentNode.tagName !== 'A' && urlRegex.test(node.nodeValue)) targets.push(node); }
-        targets.forEach(t => {
-            const s = document.createElement('span');
-            s.innerHTML = t.nodeValue.replace(urlRegex, u => `<a href="${u.startsWith('http')?u:'http://'+u}" target="_blank">${u}</a>`);
-            t.parentNode.replaceChild(s, t);
-        });
-        return div.innerHTML;
-    }
-
-    // --- 인증 로직 ---
-    function toggleAuthMode() {
-        isLoginMode = !isLoginMode;
-        document.getElementById('auth-title').innerText = isLoginMode ? "로그인" : "회원가입";
-        document.getElementById('auth-toggle-text').innerText = isLoginMode ? "처음이신가요? 회원가입" : "이미 회원이신가요? 로그인";
-    }
-    function handleAuth() {
-        const id = document.getElementById('auth-id').value.trim();
-        const pw = document.getElementById('auth-pw').value.trim();
-        if(!id || !pw) return alert("아이디와 비번을 입력하세요.");
-        if(isLoginMode) {
-            if(id === 'admin' && pw === '78963') loginOk({id:'admin', name:'관리자'});
-            else {
-                const u = users.find(x => x.id === id && x.pw === pw);
-                if(u) loginOk(u); else alert("정보가 일치하지 않습니다.");
-            }
-        } else {
-            if(id === 'admin') return alert("admin 아이디는 사용할 수 없습니다.");
-            if(users.find(x => x.id === id)) return alert("중복된 아이디입니다.");
-            users.push({id, pw, name: id});
-            localStorage.setItem('brd_u_v3', JSON.stringify(users));
-            alert("가입 성공!"); toggleAuthMode();
-        }
-    }
-    function loginOk(u) { currentUser = u; localStorage.setItem('brd_s_v3', JSON.stringify(u)); initApp(); }
-    function logout() { localStorage.removeItem('brd_s_v3'); location.reload(); }
-
-    // --- 게시판 로직 ---
-    function initApp() {
-        if(!currentUser) {
-            document.getElementById('auth-section').classList.remove('hidden');
-            document.getElementById('app-section').classList.add('hidden');
-        } else {
-            document.getElementById('auth-section').classList.add('hidden');
-            document.getElementById('app-section').classList.remove('hidden');
-            document.getElementById('current-user-display').innerText = currentUser.name;
-            showListPage();
-        }
-    }
-    function hidePages() { ['list-page', 'write-page', 'view-page', 'author-page'].forEach(p => document.getElementById(p).classList.add('hidden')); }
-    
-    function showListPage() { 
-        isEditMode = false;
-        hidePages(); 
-        document.getElementById('list-page').classList.remove('hidden'); 
-        renderList(); 
-    }
-
-    function showWritePage() {
-        isEditMode = false;
-        hidePages();
-        document.getElementById('write-page').classList.remove('hidden');
-        document.getElementById('write-title').innerText = "새 글 작성";
-        document.getElementById('save-btn').innerText = "등록";
-        document.getElementById('post-title').value = '';
-        document.getElementById('post-content-editable').innerHTML = '';
-        document.getElementById('post-code').value = '';
-        if(currentUser.id === 'admin') document.getElementById('notice-option-wrapper').classList.remove('hidden');
-        else document.getElementById('notice-option-wrapper').classList.add('hidden');
-    }
-
-    function renderList() {
-        const tbody = document.getElementById('post-list');
-        tbody.innerHTML = '';
-        const sorted = [...posts].sort((a,b) => (a.type === 'notice' ? -1 : 1));
-        sorted.forEach(p => {
-            const idx = posts.indexOf(p);
-            const isWithdrawn = !users.find(u => u.id === p.author) && p.author !== 'admin';
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><span class="badge ${p.type === 'notice' ? 'badge-notice' : 'badge-normal'}">${p.type === 'notice' ? '공지' : '일반'}</span></td>
-                <td><a href="#" onclick="viewPost(${idx})">${p.title}</a></td>
-                <td><span class="author-link" onclick="showStats('${p.author}')">${isWithdrawn?'(탈퇴)'+p.author:p.author}</span></td>
-                <td>${p.date}</td>
-            `;
-            tbody.appendChild(tr);
-        });
-    }
-
-    function savePost() {
-        const title = document.getElementById('post-title').value;
-        const content = document.getElementById('post-content-editable').innerHTML;
-        const code = document.getElementById('post-code').value;
-        const type = currentUser.id === 'admin' ? document.getElementById('post-type').value : 'normal';
-
-        if(!title || !content.trim()) return alert("제목과 내용을 채워주세요.");
-
-        if(isEditMode) {
-            // 수정 모드
-            posts[curViewIdx].title = title;
-            posts[curViewIdx].content = content;
-            posts[curViewIdx].code = code;
-            posts[curViewIdx].type = type;
-            alert("수정되었습니다.");
-        } else {
-            // 새 글 모드
-            posts.push({ type, title, content, code, author: currentUser.id, date: new Date().toLocaleDateString() });
-        }
-
-        localStorage.setItem('brd_p_v3', JSON.stringify(posts));
-        showListPage();
-    }
-
-    function viewPost(idx) {
-        curViewIdx = idx;
-        const p = posts[idx];
-        hidePages();
-        document.getElementById('view-page').classList.remove('hidden');
-        document.getElementById('view-title').innerText = p.title;
-        document.getElementById('view-info').innerText = `작성자: ${p.author} | 날짜: ${p.date}`;
-        document.getElementById('view-content').innerHTML = smartLinkify(p.content);
-        
-        const cw = document.getElementById('view-code-wrapper');
-        if(p.code) { cw.classList.remove('hidden'); document.getElementById('view-code').innerText = p.code; } else cw.classList.add('hidden');
-
-        // 수정/삭제 권한 체크
-        const isOwner = (currentUser.id === p.author || currentUser.id === 'admin');
-        document.getElementById('edit-btn').classList.toggle('hidden', !isOwner);
-        document.getElementById('delete-btn').classList.toggle('hidden', !isOwner);
-    }
-
-    function deletePost() { if(confirm("정말 삭제할까요?")) { posts.splice(curViewIdx, 1); localStorage.setItem('brd_p_v3', JSON.stringify(posts)); showListPage(); } }
-
-    function showStats(aid) {
-        hidePages();
-        document.getElementById('author-page').classList.remove('hidden');
-        const ups = posts.filter(p => p.author === aid);
-        document.getElementById('author-title-text').innerText = `${aid} 님의 활동`;
-        document.getElementById('stats-content').innerHTML = `총 작성글: <b>${ups.length}</b>개`;
-        const tbody = document.getElementById('author-post-list');
-        tbody.innerHTML = '';
-        ups.forEach(p => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${p.type}</td><td><a href="#" onclick="viewPost(${posts.indexOf(p)})">${p.title}</a></td><td>${p.date}</td>`;
-            tbody.appendChild(tr);
-        });
-    }
-
-    initApp();
-</script>
-</body>
-</html> -->
-<!-- <!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>회원 탈퇴 기능 포함 게시판</title>
-    <style>
-        :root { --primary: #4a90e2; --notice: #e74c3c; --bg: #f0f2f5; --code-bg: #2d3436; --danger: #eb4d4b; }
-        body { font-family: 'Pretendard', sans-serif; background: var(--bg); margin: 0; padding: 0; }
-        .container { max-width: 900px; margin: 40px auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-        
-        .hidden { display: none !important; }
-        .btn { padding: 8px 14px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-        .btn-primary { background: var(--primary); color: white; }
-        .btn-danger { background: var(--danger); color: white; }
-        .btn-secondary { background: #636e72; color: white; }
-        input, select, textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; margin-top: 5px; }
-
-        /* 에디터 스타일 */
-        .editor-container { border: 1px solid #ddd; border-radius: 6px; overflow: hidden; }
-        .editor-toolbar { background: #f8f9fa; padding: 8px; border-bottom: 1px solid #ddd; display: flex; gap: 8px; }
-        .editor-btn { background: white; border: 1px solid #ccc; padding: 5px 12px; cursor: pointer; border-radius: 4px; font-size: 13px; }
-        
-        #post-content-editable, #view-content { 
-            width: 100%; min-height: 250px; padding: 15px; 
-            line-height: 1.6; font-size: 15px; color: #333;
-            word-break: break-all; outline: none; box-sizing: border-box;
-        }
-
-        /* 헤더 정보 */
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 15px; }
-        .user-menu { display: flex; gap: 10px; align-items: center; }
-
-        /* 테이블 및 링크 */
-        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-        th, td { padding: 15px; border-bottom: 1px solid #eee; text-align: left; }
-        .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; color: white; font-weight: bold; }
-        .badge-notice { background: var(--notice); }
-        .badge-normal { background: var(--primary); }
-        .author-link { color: var(--primary); cursor: pointer; font-weight: bold; text-decoration: underline; }
-        pre { background: var(--code-bg); color: #fab1a0; padding: 15px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; font-family: 'Consolas', monospace; }
-        #view-content a { color: #007bff; text-decoration: underline; }
-    </style>
-</head>
-<body>
-
-
-    <div id="auth-section">
-        <div style="max-width: 400px; margin: 100px auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
-            <h2 id="auth-title" style="text-align: center;">로그인</h2>
-            <input type="text" id="auth-id" placeholder="아이디">
-            <input type="password" id="auth-pw" placeholder="비밀번호">
-            <button class="btn btn-primary" style="width: 100%; margin-top: 20px;" onclick="handleAuth()" id="auth-btn">로그인</button>
-            <p style="text-align: center; margin-top: 15px; cursor: pointer; color: var(--primary);" onclick="toggleAuthMode()" id="auth-toggle-text">회원가입</p>
-        </div>
-    </div>
-
-
-    <div id="app-section" class="hidden">
-        <div class="container">
-            <div class="header">
-                <div>접속자: <span id="current-user-display" style="font-weight: bold; color: var(--primary);"></span></div>
-                <div class="user-menu">
-                    <button class="btn btn-secondary" onclick="logout()">로그아웃</button>
-                    <button class="btn btn-danger" onclick="withdrawAccount()" style="font-size: 11px; padding: 5px 10px;">회원 탈퇴</button>
-                </div>
-            </div>
-
-
-            <div id="list-page">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h2>게시글 목록</h2>
-                    <button class="btn btn-primary" onclick="showWritePage()">글쓰기</button>
-                </div>
-                <table>
-                    <thead><tr><th>유형</th><th>제목</th><th>작성자</th><th>날짜</th></tr></thead>
-                    <tbody id="post-list"></tbody>
-                </table>
-            </div>
-
-            <div id="write-page" class="hidden">
-                <h2>새 글 작성</h2>
-                <div id="notice-option-wrapper" class="hidden">
-                    <label>유형</label>
-                    <select id="post-type"><option value="normal">일반</option><option value="notice">공지사항</option></select>
-                </div>
-                <div style="margin-top: 10px;"><label>제목</label><input type="text" id="post-title"></div>
-                <div style="margin-top: 15px;">
-                    <label>본문</label>
-                    <div class="editor-container">
-                        <div class="editor-toolbar">
-                            <button class="editor-btn" onclick="execCmd('bold')"><b>B</b></button>
-                            <button class="editor-btn" onclick="execCmd('italic')"><i>I</i></button>
-                            <button class="editor-btn" onclick="execCmd('underline')"><u>U</u></button>
-                            <button class="editor-btn" onclick="addLink()">링크</button>
-                        </div>
-                        <div id="post-content-editable" contenteditable="true"></div>
-                    </div>
-                </div>
-                <div style="margin-top: 15px;"><label>코드</label><textarea id="post-code"></textarea></div>
-                <div style="margin-top: 20px;">
-                    <button class="btn btn-primary" onclick="savePost()">등록</button>
-                    <button class="btn btn-secondary" onclick="showListPage()">취소</button>
-                </div>
-            </div>
-
-
-            <div id="view-page" class="hidden">
-                <h2 id="view-title"></h2>
-                <div id="view-info" style="color: #888; margin-bottom: 20px;"></div>
-                <div id="view-content"></div>
-                <div id="view-code-wrapper" class="hidden"><pre><code id="view-code"></code></pre></div>
-                <hr>
-                <button class="btn btn-secondary" onclick="showListPage()">목록으로</button>
-                <button class="btn btn-danger hidden" id="delete-btn" onclick="deletePost()">삭제</button>
-            </div>
-
-
-            <div id="author-page" class="hidden">
-                <h2 id="author-title-text"></h2>
-                <div id="stats-content" style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;"></div>
-                <table>
-                    <thead><tr><th>유형</th><th>제목</th><th>날짜</th></tr></thead>
-                    <tbody id="author-post-list"></tbody>
-                </table>
-                <button class="btn btn-secondary" onclick="showListPage()">목록으로</button>
-            </div>
-        </div>
-    </div>
-
-<script>
-    let users = JSON.parse(localStorage.getItem('brd_users_v2')) || [];
-    let posts = JSON.parse(localStorage.getItem('brd_posts_v2')) || [];
-    let currentUser = JSON.parse(localStorage.getItem('brd_sess_v2'));
-    let isLoginMode = true;
-    let curIdx = null;
-
-    // --- 회원 탈퇴 함수 ---
-    function withdrawAccount() {
-        if (currentUser.id === 'admin') {
-            alert("관리자 계정은 탈퇴할 수 없습니다.");
-            return;
-        }
-
-        if (confirm("정말로 탈퇴하시겠습니까?\n작성하신 게시글은 유지되지만 계정 정보는 즉시 삭제됩니다.")) {
-            // 사용자 목록에서 제거
-            users = users.filter(u => u.id !== currentUser.id);
-            localStorage.setItem('brd_users_v2', JSON.stringify(users));
-            
-            alert("탈퇴가 완료되었습니다. 이용해 주셔서 감사합니다.");
-            logout(); // 세션 삭제 및 로그인창으로 이동
-        }
-    }
-
-    // --- 서식 및 링크 처리 ---
-    function execCmd(cmd) { document.execCommand(cmd, false, null); }
-    function addLink() {
-        const url = prompt("링크 주소(http:// 포함):", "http://");
-        if(url && url !== "http://") document.execCommand('createLink', false, url);
-    }
-
-    function smartLinkify(html) {
-        const urlRegex = /(((https?:\/\/)|(www\.))[^\s\t\n<>"\\^`{|}]*)/ig;
-        const div = document.createElement('div');
-        div.innerHTML = html;
-        const walk = document.createTreeWalker(div, NodeFilter.SHOW_TEXT, null, false);
-        let node;
-        const targets = [];
-        while(node = walk.nextNode()) {
-            if (node.parentNode.tagName !== 'A' && urlRegex.test(node.nodeValue)) targets.push(node);
-        }
-        targets.forEach(textNode => {
-            const span = document.createElement('span');
-            span.innerHTML = textNode.nodeValue.replace(urlRegex, url => {
-                const href = url.startsWith('http') ? url : 'http://' + url;
-                return `<a href="${href}" target="_blank">${url}</a>`;
-            });
-            textNode.parentNode.replaceChild(span, textNode);
-        });
-        return div.innerHTML;
-    }
-
-    // --- 인증 로직 ---
-    function toggleAuthMode() {
-        isLoginMode = !isLoginMode;
-        document.getElementById('auth-title').innerText = isLoginMode ? "로그인" : "회원가입";
-        document.getElementById('auth-toggle-text').innerText = isLoginMode ? "회원가입" : "로그인으로 돌아가기";
-    }
-
-    function handleAuth() {
-        const id = document.getElementById('auth-id').value.trim();
-        const pw = document.getElementById('auth-pw').value.trim();
-        if(!id || !pw) return alert("입력 필수");
-
-        if(isLoginMode) {
-            if(id === 'admin' && pw === '78963') loginOk({id:'admin', name:'관리자'});
-            else {
-                const u = users.find(x => x.id === id && x.pw === pw);
-                if(u) loginOk(u); else alert("정보 불일치");
-            }
-        } else {
-            if(id === 'admin') return alert("admin 사용 불가");
-            if(users.find(x => x.id === id)) return alert("중복 아이디");
-            users.push({id, pw, name: id});
-            localStorage.setItem('brd_users_v2', JSON.stringify(users));
-            alert("가입 성공!"); toggleAuthMode();
-        }
-    }
-
-    function loginOk(user) {
-        currentUser = user;
-        localStorage.setItem('brd_sess_v2', JSON.stringify(user));
-        initApp();
-    }
-
-    function logout() { localStorage.removeItem('brd_sess_v2'); location.reload(); }
-
-    // --- 게시판 기본 로직 ---
-    function initApp() {
-        if(!currentUser) {
-            document.getElementById('auth-section').classList.remove('hidden');
-            document.getElementById('app-section').classList.add('hidden');
-        } else {
-            document.getElementById('auth-section').classList.add('hidden');
-            document.getElementById('app-section').classList.remove('hidden');
-            document.getElementById('current-user-display').innerText = currentUser.name;
-            showListPage();
-        }
-    }
-
-    function hidePages() { ['list-page', 'write-page', 'view-page', 'author-page'].forEach(p => document.getElementById(p).classList.add('hidden')); }
-
-    function showListPage() { hidePages(); document.getElementById('list-page').classList.remove('hidden'); renderList(); }
-
-    function showWritePage() {
-        hidePages(); document.getElementById('write-page').classList.remove('hidden');
-        document.getElementById('post-title').value = '';
-        document.getElementById('post-content-editable').innerHTML = '';
-        document.getElementById('post-code').value = '';
-        if(currentUser.id === 'admin') document.getElementById('notice-option-wrapper').classList.remove('hidden');
-        else document.getElementById('notice-option-wrapper').classList.add('hidden');
-    }
-
-    function renderList() {
-        const tbody = document.getElementById('post-list');
-        tbody.innerHTML = '';
-        const sorted = [...posts].sort((a,b) => (a.type === 'notice' ? -1 : 1));
-        sorted.forEach(p => {
-            const idx = posts.indexOf(p);
-            // 탈퇴한 회원인지 체크
-            const isWithdrawn = !users.find(u => u.id === p.author) && p.author !== 'admin';
-            const displayAuthor = isWithdrawn ? `<span style="color:#aaa;">(탈퇴회원) ${p.author}</span>` : p.author;
-
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><span class="badge ${p.type === 'notice' ? 'badge-notice' : 'badge-normal'}">${p.type === 'notice' ? '공지' : '일반'}</span></td>
-                <td><a href="#" onclick="viewPost(${idx})">${p.title}</a></td>
-                <td><span class="author-link" onclick="showStats('${p.author}')">${displayAuthor}</span></td>
-                <td>${p.date}</td>
-            `;
-            tbody.appendChild(tr);
-        });
-    }
-
-    function savePost() {
-        const title = document.getElementById('post-title').value;
-        const content = document.getElementById('post-content-editable').innerHTML;
-        const code = document.getElementById('post-code').value;
-        const type = currentUser.id === 'admin' ? document.getElementById('post-type').value : 'normal';
-        if(!title || !content.trim()) return alert("입력 확인");
-        posts.push({ type, title, content, code, author: currentUser.id, date: new Date().toLocaleDateString() });
-        localStorage.setItem('brd_posts_v2', JSON.stringify(posts));
-        showListPage();
-    }
-
-    function viewPost(idx) {
-        curIdx = idx; const p = posts[idx];
-        hidePages(); document.getElementById('view-page').classList.remove('hidden');
-        document.getElementById('view-title').innerText = p.title;
-        document.getElementById('view-info').innerText = `작성자: ${p.author} | 날짜: ${p.date}`;
-        document.getElementById('view-content').innerHTML = smartLinkify(p.content);
-        const cw = document.getElementById('view-code-wrapper');
-        if(p.code) { cw.classList.remove('hidden'); document.getElementById('view-code').innerText = p.code; } else cw.classList.add('hidden');
-        const db = document.getElementById('delete-btn');
-        if(currentUser.id === p.author || currentUser.id === 'admin') db.classList.remove('hidden'); else db.classList.add('hidden');
-    }
-
-    function deletePost() { if(confirm("삭제?")) { posts.splice(curIdx, 1); localStorage.setItem('brd_posts_v2', JSON.stringify(posts)); showListPage(); } }
-
-    function showStats(aid) {
-        hidePages(); document.getElementById('author-page').classList.remove('hidden');
-        const isWithdrawn = !users.find(u => u.id === aid) && aid !== 'admin';
-        document.getElementById('author-title-text').innerText = isWithdrawn ? `${aid} (탈퇴회원) 정보` : `${aid} 님의 활동 정보`;
-        const ups = posts.filter(p => p.author === aid);
-        document.getElementById('stats-content').innerHTML = `총 작성글: <b>${ups.length}</b>개`;
-        const tbody = document.getElementById('author-post-list');
-        tbody.innerHTML = '';
-        ups.forEach(p => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${p.type}</td><td><a href="#" onclick="viewPost(${posts.indexOf(p)})">${p.title}</a></td><td>${p.date}</td>`;
-            tbody.appendChild(tr);
-        });
-    }
-
-    initApp();
-</script>
-</body>
-</html> -->
