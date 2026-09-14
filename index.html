@@ -554,7 +554,7 @@
     function showListPage() { hidePages(); document.getElementById('list-page').classList.remove('hidden'); applyFilters(currentListPage); }
 
     let currentListPage = 1; // 현재 목록 페이지 번호
-    const LIST_PER_PAGE = 7; // 페이지당 게시글 수
+    const LIST_PER_PAGE = 8; // 페이지당 게시글 수
     let activeListData = posts; // 현재 필터가 적용된 전체 데이터(페이지네이션 전)
 
     function renderList(dataToRender, page = 1) {
