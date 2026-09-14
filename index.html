@@ -200,7 +200,13 @@
             <div id="list-page">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h2 style="margin: 0;">게시글 목록</h2>
-                    <button class="btn btn-primary" onclick="showWritePage()">새 글 작성</button>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span id="storage-usage-info" style="font-size: 12px; color: #888;"></span>
+                        <div style="width: 100px; height: 8px; background: #dcdfe3; border-radius: 4px; overflow: hidden;">
+                            <div id="storage-usage-bar" style="height: 100%; width: 0%; background: var(--primary); border-radius: 4px; transition: width 0.3s ease;"></div>
+                        </div>
+                        <button class="btn btn-primary" onclick="showWritePage()">새 글 작성</button>
+                    </div>
                 </div>
 
                 <!-- 검색 바 -->
@@ -598,7 +604,7 @@
         }); 
     }
     
-    function showListPage() { hidePages(); document.getElementById('list-page').classList.remove('hidden'); applyFilters(currentListPage); }
+    function showListPage() { hidePages(); document.getElementById('list-page').classList.remove('hidden'); applyFilters(currentListPage); updateStorageUsageDisplay(); }
 
     let currentListPage = 1; // 현재 목록 페이지 번호
     const LIST_PER_PAGE = 8; // 페이지당 게시글 수
@@ -754,7 +760,7 @@
             const div = document.createElement('div');
             div.className = 'comment-item';
             div.innerHTML = `
-                <div class="comment-author">${c.author}</div>
+                <div class="comment-author">${getLevelNameHTML(c.author, computeLevel(c.author))}</div>
                 <div class="comment-text">${c.text}</div>
                 <div class="comment-date">${c.date}</div>
                 ${canDel ? `<div class="comment-delete" onclick="deleteComment(${c.id})">삭제</div>` : ''}
@@ -765,10 +771,58 @@
 
     function deletePost() { if(confirm("글을 삭제할까요?")) { posts.splice(currentIdx, 1); saveData(); showListPage(); } }
     function copyCode() { navigator.clipboard.writeText(document.getElementById('view-code').innerText); alert("코드가 복사되었습니다!"); }
+
+    // --- 로컬스토리지 용량 대비 ---
+    function isQuotaExceededError(e) {
+        return e && (
+            e.name === 'QuotaExceededError' ||
+            e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+            e.code === 22 ||
+            e.code === 1014
+        );
+    }
+
+    function getStorageUsageInfo() {
+        try {
+            const u = localStorage.getItem('final_u') || '';
+            const p = localStorage.getItem('final_p') || '';
+            const s = localStorage.getItem('final_s') || '';
+            const usedBytes = new Blob([u, p, s]).size;
+            const estimatedLimitBytes = 5 * 1024 * 1024; // 브라우저마다 다르지만 통상 5MB로 가정한 값
+            const percent = Math.min(100, Math.round((usedBytes / estimatedLimitBytes) * 100));
+            return { usedBytes, percent };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function updateStorageUsageDisplay() {
+        const el = document.getElementById('storage-usage-info');
+        const bar = document.getElementById('storage-usage-bar');
+        if (!el) return;
+        const info = getStorageUsageInfo();
+        if (!info) { el.textContent = ''; if(bar) bar.style.width = '0%'; return; }
+        const usedKB = (info.usedBytes / 1024).toFixed(1);
+        el.textContent = `저장공간 약 ${info.percent}% 사용 중 (${usedKB}KB)`;
+        el.style.color = info.percent >= 90 ? '#eb4d4b' : (info.percent >= 70 ? '#e67e22' : '#888');
+        if(bar) bar.style.width = `${info.percent}%`;
+    }
+
     function saveData() {
-        localStorage.setItem('final_u', JSON.stringify(users));
-        localStorage.setItem('final_p', JSON.stringify(posts));
-        localStorage.setItem('final_s', JSON.stringify(currentUser));
+        try {
+            // 용량이 큰 posts를 먼저 저장 시도 -> 여기서 실패하면 계정/세션 정보는 건드리지 않아 상태가 덜 깨짐
+            localStorage.setItem('final_p', JSON.stringify(posts));
+            localStorage.setItem('final_u', JSON.stringify(users));
+            localStorage.setItem('final_s', JSON.stringify(currentUser));
+        } catch (e) {
+            console.error('saveData 실패:', e);
+            if (isQuotaExceededError(e)) {
+                alert('⚠️ 브라우저 저장 공간이 가득 찼습니다!\n\n방금 변경한 내용이 저장되지 못했을 수 있습니다.\n이미지가 많이 첨부된 글이나 오래된 글을 삭제한 뒤 다시 시도해주세요.');
+            } else {
+                alert('데이터 저장 중 오류가 발생했습니다: ' + e.message);
+            }
+        }
+        updateStorageUsageDisplay();
     }
     // --- 순위 보기 기능 ---
     let currentRankPage = 1; // 현재 순위 페이지 번호
