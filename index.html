@@ -152,6 +152,22 @@
         .rank-3 { color: #cd7f32; font-weight: bold; } /* 동메달 */
         .rank-item { font-size: 16px; }
         .score-tag { font-size: 12px; color: #888; margin-left: 10px; }
+
+        /* 레벨 276+ 닉네임 무지개 효과 */
+        .rainbow {
+            background: linear-gradient(90deg, red, orange, green, blue, indigo, violet);
+            background-size: 300% 100%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: smooth-rainbow 6s infinite ease-in-out;
+            font-weight: bold;
+        }
+        @keyframes smooth-rainbow {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
         
     </style>
 </head>
@@ -342,6 +358,35 @@
     let isLoginMode = true;
     let currentIdx = null;
     let isEditMode = false;
+
+    // --- 레벨 계산 & 레벨별 닉네임 하이라이트 ---
+    function computeLevel(uid) {
+        const userPosts = posts.filter(p => p.author === uid);
+        const totalLikes = userPosts.reduce((acc, p) => acc + (p.likes ? p.likes.length : 0), 0);
+        return parseInt((Number(userPosts.length) + totalLikes) / 7) + 1;
+    }
+
+    function getLevelNameHTML(name, level) {
+        if(level >= 276) {
+            return `<span class="rainbow">${name}</span>`;
+        }
+        if(level >= 251) {
+            // 빨간색이지만 첫 글자만 검정색
+            const first = name.charAt(0);
+            const rest = name.slice(1);
+            return `<span style="color:#000;">${first}</span><span style="color:red;">${rest}</span>`;
+        }
+        if(level >= 226) return `<span style="color:red;">${name}</span>`;
+        if(level >= 201) return `<span style="color:#ff8c00;">${name}</span>`;
+        if(level >= 176) return `<span style="color:#a0a;">${name}</span>`;
+        if(level >= 151) return `<span style="color:blue;">${name}</span>`;
+        if(level >= 126) return `<span style="color:#03a89e;">${name}</span>`;
+        if(level >= 101) return `<span style="color:green;">${name}</span>`;
+        if(level >= 76) return `<span style="color:#a7c607;">${name}</span>`;
+        if(level >= 51) return `<span style="color:#c6b207;">${name}</span>`;
+        if(level >= 26) return `<span style="color:#8e8c01;">${name}</span>`;
+        return `<span>${name}</span>`; // Lv.1 ~ Lv.25: 기본(검정) 색
+    }
     // --- 검색 & 카테고리 필터 기능 ---
     function applyFilters(page = 1) {
         const category = document.getElementById('category-filter').value;
@@ -382,7 +427,9 @@
         const noticeCount = userPosts.filter(p => p.type === 'notice').length;
         const totalLikes = userPosts.reduce((acc, p) => acc + (p.likes ? p.likes.length : 0), 0);
         const isWithdrawn = !users.find(u => u.id === aid) && aid !== 'admin';
-        document.getElementById('author-title-text').innerText = isWithdrawn ? `Lv.-1) ${aid} (탈퇴회원) 정보` : `Lv.${parseInt((Number(userPosts.length)+totalLikes)/7)+1}) ${aid} 님의 정보`;
+        const level = parseInt((Number(userPosts.length)+totalLikes)/7)+1;
+        const nameHtml = getLevelNameHTML(aid, level);
+        document.getElementById('author-title-text').innerHTML = isWithdrawn ? `Lv.-1) ${nameHtml} (탈퇴회원) 정보` : `Lv.${level}) ${nameHtml} 님의 정보`;
 
         document.getElementById('stats-content').innerHTML = `
             <div class="stats-item">총 게시글 <b>${userPosts.length}</b>개</div>
@@ -575,17 +622,28 @@
         pageData.forEach(p => {
             const idx = posts.indexOf(p);
             const isWithdrawn = !users.find(u => u.id === p.author) && p.author !== 'admin';
+            const authorLevel = computeLevel(p.author);
+            const authorNameHtml = getLevelNameHTML(p.author, authorLevel);
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><span class="badge ${p.type === 'notice' ? 'badge-notice' : 'badge-normal'}">${p.type === 'notice' ? '공지' : '일반'}</span></td>
                 <td><span class="category-badge">${p.category || '-'}</span></td>
                 <td><a href="#" onclick="viewPost(${idx})">${p.title} <small>[${p.comments?p.comments.length:0}]</small></a></td>
-                <td><span class="author-link" onclick="showStats('${p.author}')">${isWithdrawn?'(탈퇴)'+p.author:p.author}</span></td>
+                <td><span class="author-link" onclick="showStats('${p.author}')">${isWithdrawn?'(탈퇴)':''}${authorNameHtml}</span></td>
                 <td style="color:var(--like)">♥ ${p.likes?p.likes.length:0}</td>
                 <td style="font-size:12px;">${p.date}</td>
             `;
             tbody.appendChild(tr);
         });
+
+        // 글이 8개 미만이어도 카드 높이(내비게이션 바 위치)가 변하지 않도록 빈 행으로 채움
+        const emptyRowCount = LIST_PER_PAGE - pageData.length;
+        for(let i = 0; i < emptyRowCount; i++) {
+            const filler = document.createElement('tr');
+            filler.style.visibility = 'hidden';
+            filler.innerHTML = `<td colspan="6" style="padding: 15px;">&nbsp;</td>`;
+            tbody.appendChild(filler);
+        }
 
         renderListPagination(totalPages, currentListPage);
     }
@@ -779,7 +837,8 @@
             const userPosts = posts.filter(p => p.author === user.id);
             const totalLikes = userPosts.reduce((acc, p) => acc + (p.likes ? p.likes.length : 0), 0);
             const score = (userPosts.length * 10) + (totalLikes * 5);
-            return { id: user.id, score, postCount: userPosts.length, totalLikes };
+            const level = parseInt((Number(userPosts.length) + totalLikes) / 7) + 1;
+            return { id: user.id, score, postCount: userPosts.length, totalLikes, level };
         });
 
         // 점수 내림차순 정렬
@@ -792,7 +851,7 @@
         
         const myRankDisplay = document.getElementById('my-rank-display');
         myRankDisplay.innerHTML = `
-            <div>나의 순위: <b>${myRank}위</b> (${currentUser.id})</div>
+            <div>나의 순위: <b>${myRank}위</b> (${getLevelNameHTML(currentUser.id, myData.level)})</div>
             <div>내 활동 점수: <b>${myData.score.toLocaleString()}점</b></div>
         `;
 
@@ -819,7 +878,7 @@
 
             tr.innerHTML = `
                 <td class="${rankClass}">${actualRank}위</td>
-                <td><b class="author-link" onclick="showStats('${data.id}')">Lv.${parseInt((Number(data.postCount)+data.totalLikes)/7)+1}) ${data.id}</b></td>
+                <td><b class="author-link" onclick="showStats('${data.id}')">Lv.${data.level}) ${getLevelNameHTML(data.id, data.level)}</b></td>
                 <td><b>${data.score.toLocaleString()}</b></td>
                 <td style="font-size: 12px; color: #666;">글 ${data.postCount} / 좋아요 ${data.totalLikes}</td>
             `;
