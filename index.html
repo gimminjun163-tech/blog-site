@@ -4,6 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>자유 게시판</title>
+
+    <!-- 수식 렌더링: KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- 코드 하이라이트: highlight.js -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <style>
         :root { --primary: #4a90e2; --notice: #e74c3c; --bg: #f0f2f5; --code-bg: #2d3436; --danger: #eb4d4b; --success: #2ecc71; --like: #ff4757; }
         body { font-family: 'Pretendard', -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 0; color: #333; }
@@ -60,6 +69,10 @@
         /* 코드 복사 섹션 */
         .code-wrapper { position: relative; margin-top: 25px; }
         pre { background: var(--code-bg); color: #fab1a0; padding: 15px; border-radius: 8px; overflow-x: auto; font-family: 'Consolas', monospace; font-size: 14px; margin: 0; }
+        /* highlight.js 테마의 배경을 우리 코드 박스 배경으로 통일 (id 선택자로 우선순위 확보) */
+        #view-code.hljs { background: transparent !important; color: #fab1a0; }
+        /* 수식(KaTeX) 렌더링 여백 */
+        #view-content .katex-display { margin: 1em 0; overflow-x: auto; overflow-y: hidden; }
         .copy-btn { position: absolute; top: 12px; right: 12px; background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; }
 
         /* 통계 박스 */
@@ -265,11 +278,28 @@
                             <button id="btn-underline" class="editor-btn" onclick="execCmd('underline')">U</button>
                             <button id="btn-strike" class="editor-btn" onclick="execCmd('strikeThrough')">S</button>
                             <button class="editor-btn" onclick="addLink()">링크</button>
+                            <button class="editor-btn" onclick="insertMath()">Σ 수식</button>
                         </div>
                         <div id="post-content-editable" contenteditable="true"></div>
                     </div>
+                    <p style="font-size: 12px; color: #999; margin-top: 6px;">수식은 <code>$수식$</code> (본문 안) 또는 <code>$$수식$$</code> (독립 줄)로 감싸면 자동으로 렌더링됩니다. 예: <code>$E=mc^2$</code></p>
                 </div>
-                <div style="margin-top: 15px;"><label>코드 영역 (선택사항)</label><textarea id="post-code" style="height: 120px; font-family: monospace;"></textarea></div>
+                <div style="margin-top: 15px;">
+                    <label>코드 영역 (선택사항)</label>
+                    <select id="post-code-lang" style="margin-bottom: 5px;">
+                        <option value="auto">언어 자동 감지</option>
+                        <option value="javascript">JavaScript</option>
+                        <option value="python">Python</option>
+                        <option value="cpp">C++</option>
+                        <option value="java">Java</option>
+                        <option value="html">HTML</option>
+                        <option value="css">CSS</option>
+                        <option value="json">JSON</option>
+                        <option value="bash">Bash</option>
+                        <option value="sql">SQL</option>
+                    </select>
+                    <textarea id="post-code" style="height: 120px; font-family: monospace;"></textarea>
+                </div>
                 <div style="margin-top: 25px; display: flex; gap: 10px;">
                     <button class="btn btn-primary" id="save-btn" onclick="savePost()">저장하기</button>
                     <button class="btn btn-secondary" onclick="showListPage()">취소</button>
@@ -534,6 +564,13 @@
         if(url && url !== "http://") document.execCommand('createLink', false, url);
     }
 
+    function insertMath() {
+        const formula = prompt("수식을 LaTeX 형식으로 입력하세요 (예: x^2 + y^2 = z^2):", "");
+        if(formula === null || formula.trim() === '') return;
+        document.getElementById('post-content-editable').focus();
+        document.execCommand('insertText', false, `$${formula}$`);
+    }
+
     function smartLinkify(html) {
         const urlRegex = /(((https?:\/\/)|(www\.))[^\s\t\n<>"\\^`{|}]*)/ig;
         const div = document.createElement('div');
@@ -694,6 +731,7 @@
         document.getElementById('post-title').value = '';
         document.getElementById('post-content-editable').innerHTML = '';
         document.getElementById('post-code').value = '';
+        document.getElementById('post-code-lang').value = 'auto';
         document.getElementById('post-category').value = '코딩';
         document.getElementById('notice-option-wrapper').classList.toggle('hidden', currentUser.id !== 'admin');
     }
@@ -708,6 +746,7 @@
         document.getElementById('post-title').value = p.title;
         document.getElementById('post-content-editable').innerHTML = p.content;
         document.getElementById('post-code').value = p.code || '';
+        document.getElementById('post-code-lang').value = p.codeLang || 'auto';
         document.getElementById('post-category').value = p.category || '코딩';
         document.getElementById('notice-option-wrapper').classList.toggle('hidden', currentUser.id !== 'admin');
         if(currentUser.id === 'admin') document.getElementById('post-type').value = p.type;
@@ -717,16 +756,17 @@
         const title = document.getElementById('post-title').value.trim();
         const content = document.getElementById('post-content-editable').innerHTML;
         const code = document.getElementById('post-code').value.trim();
+        const codeLang = document.getElementById('post-code-lang').value;
         const type = currentUser.id === 'admin' ? document.getElementById('post-type').value : 'normal';
         const category = document.getElementById('post-category').value;
 
         if(!title || !content.replace(/<br>|&nbsp;/g, '').trim()) return alert("제목과 내용을 모두 입력하세요.");
 
         if(isEditMode) {
-            posts[currentIdx] = { ...posts[currentIdx], title, content, code, type, category };
+            posts[currentIdx] = { ...posts[currentIdx], title, content, code, codeLang, type, category };
         } else {
             // 새 글은 맨 앞(처음 인덱스)에 추가되어 목록 위쪽에서부터 늘어남
-            posts.unshift({ type, category, title, content, code, author: currentUser.id, date: new Date().toLocaleDateString(), likes: [], comments: [] });
+            posts.unshift({ type, category, title, content, code, codeLang, author: currentUser.id, date: new Date().toLocaleDateString(), likes: [], comments: [] });
         }
         saveData(); showListPage();
     }
@@ -737,6 +777,19 @@
         document.getElementById('view-title').innerText = p.title;
         document.getElementById('view-info').innerText = `작성자: ${p.author} | 날짜: ${p.date}`;
         document.getElementById('view-content').innerHTML = smartLinkify(p.content);
+
+        // 수식(KaTeX) 렌더링
+        if(window.renderMathInElement) {
+            renderMathInElement(document.getElementById('view-content'), {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false},
+                    {left: '\\(', right: '\\)', display: false},
+                    {left: '\\[', right: '\\]', display: true}
+                ],
+                throwOnError: false
+            });
+        }
         
         const lCnt = p.likes ? p.likes.length : 0;
         const liked = p.likes && p.likes.includes(currentUser.id);
@@ -745,7 +798,14 @@
         lBtn.className = liked ? "btn btn-like active" : "btn btn-like";
 
         const cw = document.getElementById('view-code-wrapper');
-        if(p.code) { cw.classList.remove('hidden'); document.getElementById('view-code').innerText = p.code; } else cw.classList.add('hidden');
+        if(p.code) {
+            cw.classList.remove('hidden');
+            const codeEl = document.getElementById('view-code');
+            codeEl.textContent = p.code;
+            codeEl.removeAttribute('data-highlighted');
+            codeEl.className = (p.codeLang && p.codeLang !== 'auto') ? `language-${p.codeLang}` : '';
+            if(window.hljs) hljs.highlightElement(codeEl);
+        } else cw.classList.add('hidden');
 
         const isOwner = currentUser.id === p.author || currentUser.id === 'admin';
         document.getElementById('edit-btn').classList.toggle('hidden', !isOwner);
