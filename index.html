@@ -408,6 +408,41 @@
     let currentIdx = null;
     let isEditMode = false;
 
+    // --- URL 라우팅을 위한 영구 고유 번호(게시글 id, 유저 uid) 부여 ---
+    // 게시글: 작성 순서대로 1, 2, 3... (posts 배열은 최신글이 맨 앞이라 뒤집어서 부여)
+    // 유저: 가입 순서대로 2, 3, 4... (admin은 항상 1)
+    (function migrateRouteIds() {
+        let changed = false;
+        if (posts.some(p => !p.id)) {
+            const chronological = [...posts].reverse();
+            chronological.forEach((p, i) => { if (!p.id) { p.id = i + 1; changed = true; } });
+        }
+        if (users.some(u => !u.uid)) {
+            users.forEach((u, i) => { if (!u.uid) { u.uid = i + 2; changed = true; } });
+        }
+        if (changed) {
+            localStorage.setItem('final_u', JSON.stringify(users));
+            localStorage.setItem('final_p', JSON.stringify(posts));
+        }
+    })();
+
+    function getNextPostId() {
+        return posts.reduce((m, p) => Math.max(m, p.id || 0), 0) + 1;
+    }
+    function getNextUid() {
+        return users.reduce((m, u) => Math.max(m, u.uid || 1), 1) + 1;
+    }
+    function getUidForUsername(username) {
+        if (username === 'admin') return 1;
+        const u = users.find(x => x.id === username);
+        return u ? u.uid : null;
+    }
+    function getUsernameForUid(uid) {
+        if (Number(uid) === 1) return 'admin';
+        const u = users.find(x => x.uid === Number(uid));
+        return u ? u.id : null;
+    }
+
     // --- 레벨 계산 & 레벨별 닉네임 하이라이트 ---
     function computeLevel(uid) {
         const userPosts = posts.filter(p => p.author === uid);
@@ -469,9 +504,13 @@
     }
 
     // --- 작성자 통계 기능 ---
-    function showStats(aid) {
+    function showStats(aid, pushUrl = true) {
         hidePages();
         document.getElementById('author-page').classList.remove('hidden');
+        if(pushUrl) {
+            const uid = getUidForUsername(aid);
+            if(uid) history.pushState(null, '', `/user/${uid}`);
+        }
         const userPosts = posts.filter(p => p.author === aid);
         const noticeCount = userPosts.filter(p => p.type === 'notice').length;
         const totalLikes = userPosts.reduce((acc, p) => acc + (p.likes ? p.likes.length : 0), 0);
@@ -505,7 +544,7 @@
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><span class="badge ${p.type === 'notice' ? 'badge-notice' : 'badge-normal'}">${p.type === 'notice' ? '공지' : '일반'}</span></td>
-                <td><a href="#" onclick="viewPost(${posts.indexOf(p)})">${p.title}</a></td>
+                <td><a href="#" onclick="viewPost(${posts.indexOf(p)}); return false;">${p.title}</a></td>
                 <td>${p.date}</td>
             `;
             tbody.appendChild(tr);
@@ -520,7 +559,7 @@
         if(lIdx > -1) p.likes.splice(lIdx, 1);
         else p.likes.push(currentUser.id);
         saveData();
-        viewPost(currentIdx);
+        viewPost(currentIdx, false);
     }
 
     function addComment() {
@@ -535,14 +574,14 @@
         });
         document.getElementById('comment-input').value = '';
         saveData();
-        viewPost(currentIdx);
+        viewPost(currentIdx, false);
     }
 
     function deleteComment(cid) {
         if(!confirm("댓글을 삭제하시겠습니까?")) return;
         posts[currentIdx].comments = posts[currentIdx].comments.filter(c => c.id !== cid);
         saveData();
-        viewPost(currentIdx);
+        viewPost(currentIdx, false);
     }
 
     // --- 에디터 보조 ---
@@ -626,7 +665,7 @@
         } else {
             if(id === 'admin') return alert("admin 아이디는 사용할 수 없습니다.");
             if(users.find(u => u.id === id)) return alert("이미 존재하는 아이디입니다.");
-            users.push({id, pw, name: id});
+            users.push({id, pw, name: id, uid: getNextUid()});
             saveData(); alert("회원가입 완료!"); toggleAuthMode();
         }
     }
@@ -656,9 +695,42 @@
             document.getElementById('auth-section').classList.add('hidden');
             document.getElementById('app-section').classList.remove('hidden');
             document.getElementById('current-user-display').innerText = currentUser.name;
-            showListPage();
+            handleRoute();
         }
     }
+
+    // --- URL 라우팅 ---
+    // /               -> 목록(홈)
+    // /post/{숫자}     -> 게시글 상세 (첫 글=1, 둘째 글=2...)
+    // /user/{숫자}     -> 유저 정보 (admin=1, 첫 유저=2, 둘째 유저=3...)
+    function redirectHome(message) {
+        if(message) alert(message);
+        history.replaceState(null, '', '/');
+        showListPage(false);
+    }
+
+    function handleRoute() {
+        const path = location.pathname;
+        let m;
+        if((m = path.match(/^\/post\/(\d+)\/?$/))) {
+            const pid = parseInt(m[1], 10);
+            const idx = posts.findIndex(p => p.id === pid);
+            if(idx !== -1) viewPost(idx, false);
+            else redirectHome('존재하지 않는 게시글입니다.');
+        } else if((m = path.match(/^\/user\/(\d+)\/?$/))) {
+            const uid = parseInt(m[1], 10);
+            const uname = getUsernameForUid(uid);
+            if(uname) showStats(uname, false);
+            else redirectHome('존재하지 않는 사용자입니다.');
+        } else {
+            showListPage(false);
+        }
+    }
+
+    // 브라우저 뒤로가기/앞으로가기 대응
+    window.addEventListener('popstate', () => {
+        if(currentUser) handleRoute();
+    });
 
     function hidePages() { 
         ['list-page', 'write-page', 'view-page', 'author-page', 'rank-page'].forEach(p => {
@@ -667,7 +739,13 @@
         }); 
     }
     
-    function showListPage() { hidePages(); document.getElementById('list-page').classList.remove('hidden'); applyFilters(currentListPage); updateStorageUsageDisplay(); }
+    function showListPage(pushUrl = true) {
+        hidePages();
+        document.getElementById('list-page').classList.remove('hidden');
+        if(pushUrl) history.pushState(null, '', '/');
+        applyFilters(currentListPage);
+        updateStorageUsageDisplay();
+    }
 
     let currentListPage = 1; // 현재 목록 페이지 번호
     const LIST_PER_PAGE = 8; // 페이지당 게시글 수
@@ -697,7 +775,7 @@
             tr.innerHTML = `
                 <td><span class="badge ${p.type === 'notice' ? 'badge-notice' : 'badge-normal'}">${p.type === 'notice' ? '공지' : '일반'}</span></td>
                 <td><span class="category-badge">${p.category || '-'}</span></td>
-                <td><a href="#" onclick="viewPost(${idx})">${p.title} <small>[${p.comments?p.comments.length:0}]</small></a></td>
+                <td><a href="#" onclick="viewPost(${idx}); return false;">${p.title} <small>[${p.comments?p.comments.length:0}]</small></a></td>
                 <td><span class="author-link" onclick="showStats('${p.author}')">${isWithdrawn?'(탈퇴)':''}${authorNameHtml}</span></td>
                 <td style="color:var(--like)">♥ ${p.likes?p.likes.length:0}</td>
                 <td style="font-size:12px;">${p.date}</td>
@@ -792,13 +870,14 @@
             posts[currentIdx] = { ...posts[currentIdx], title, content, code, codeLang, type, category };
         } else {
             // 새 글은 맨 앞(처음 인덱스)에 추가되어 목록 위쪽에서부터 늘어남
-            posts.unshift({ type, category, title, content, code, codeLang, author: currentUser.id, date: new Date().toLocaleDateString(), likes: [], comments: [] });
+            posts.unshift({ id: getNextPostId(), type, category, title, content, code, codeLang, author: currentUser.id, date: new Date().toLocaleDateString(), likes: [], comments: [] });
         }
         saveData(); showListPage();
     }
 
-    function viewPost(idx) {
+    function viewPost(idx, pushUrl = true) {
         currentIdx = idx; const p = posts[idx];
+        if(pushUrl) history.pushState(null, '', `/post/${p.id}`);
         hidePages(); document.getElementById('view-page').classList.remove('hidden');
         document.getElementById('view-title').innerText = p.title;
         document.getElementById('view-info').innerText = `작성자: ${p.author} | 날짜: ${p.date}`;
