@@ -7,8 +7,8 @@
 
     <!-- 수식 렌더링: KaTeX -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
 
     <!-- 코드 하이라이트: highlight.js -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
@@ -722,8 +722,14 @@
             const uname = getUsernameForUid(uid);
             if(uname) showStats(uname, false);
             else redirectHome('존재하지 않는 사용자입니다.');
+        } else if(path === '/ranking' || path === '/ranking/') {
+            showRankPage(1, false);
         } else {
-            showListPage(false);
+            // 홈(목록) - ?page=N, 값이 없거나 잘못되면 1로 취급 (그리고 주소창도 ?page=1로 정리됨)
+            const params = new URLSearchParams(location.search);
+            let page = parseInt(params.get('page'), 10);
+            if(!page || page < 1) page = 1;
+            showListPage(false, page);
         }
     }
 
@@ -739,11 +745,12 @@
         }); 
     }
     
-    function showListPage(pushUrl = true) {
+    function showListPage(pushUrl = true, page = null) {
         hidePages();
         document.getElementById('list-page').classList.remove('hidden');
-        if(pushUrl) history.pushState(null, '', '/');
-        applyFilters(currentListPage);
+        const targetPage = page || currentListPage || 1;
+        if(pushUrl) history.pushState(null, '', `/?page=${targetPage}`);
+        applyFilters(targetPage);
         updateStorageUsageDisplay();
     }
 
@@ -765,6 +772,12 @@
 
         const startIdx = (page - 1) * LIST_PER_PAGE;
         const pageData = sorted.slice(startIdx, startIdx + LIST_PER_PAGE);
+
+        // 주소창의 ?page= 값을 실제 표시 중인 페이지 번호와 동기화 (뒤로가기 기록은 늘리지 않음)
+        const syncedUrl = `/?page=${currentListPage}`;
+        if(location.pathname + location.search !== syncedUrl) {
+            history.replaceState(null, '', syncedUrl);
+        }
 
         pageData.forEach(p => {
             const idx = posts.indexOf(p);
@@ -1016,7 +1029,7 @@
         prevBtn.innerText = ' < ';
         prevBtn.className = 'page-btn';
         if (current > 1) {
-            prevBtn.onclick = () => showRankPage(current - 1);
+            prevBtn.onclick = () => showRankPage(current - 1, false);
         } else {
             prevBtn.disabled = true;
         }
@@ -1027,7 +1040,7 @@
             const btn = document.createElement('button');
             btn.innerText = i;
             btn.className = `page-btn ${i === current ? 'active' : ''}`;
-            btn.onclick = () => showRankPage(i);
+            btn.onclick = () => showRankPage(i, false);
             container.appendChild(btn);
         }
 
@@ -1036,17 +1049,18 @@
         nextBtn.innerText = ' > ';
         nextBtn.className = 'page-btn';
         if (current < total) {
-            nextBtn.onclick = () => showRankPage(current + 1);
+            nextBtn.onclick = () => showRankPage(current + 1, false);
         } else {
             nextBtn.disabled = true;
         }
         container.appendChild(nextBtn);
     }
     // --- 순위 보기 기능 (업데이트 버전) ---
-    function showRankPage(page = 1) {
+    function showRankPage(page = 1, pushUrl = true) {
         currentRankPage = page;
         hidePages();
         document.getElementById('rank-page').classList.remove('hidden');
+        if(pushUrl) history.pushState(null, '', '/ranking');
 
         // 1. 모든 유저 데이터 집계 및 정렬 (admin 포함 모든 가입자)
         // users에 admin이 없을 수 있으므로 합쳐서 계산
