@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <style>
-        :root { --primary: #4a90e2; --notice: #e74c3c; --bg: #f0f2f5; --code-bg: #2d3436; --danger: #eb4d4b; --success: #2ecc71; --like: #ff4757; }
+        :root { --primary: #4a90e2; --notice: #e74c3c; --bg: #f0f2f5; --code-bg: #2d3436; --danger: #eb4d4b; --success: #2ecc71; --like: #ff4757; --random: #9b59b6; }
         body { font-family: 'Pretendard', -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 0; color: #333; }
         .container { max-width: 1000px; margin: 40px auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
         .hidden { display: none !important; }
@@ -25,6 +25,7 @@
         .btn-danger { background: var(--danger); color: white; }
         .btn-secondary { background: #636e72; color: white; }
         .btn-success { background: var(--success); color: white; }
+        .btn-random { background: var(--random); color: white; white-space: nowrap; }
         .btn-like { background: white; border: 2px solid var(--like); color: var(--like); gap: 5px; }
         .btn-like.active { background: var(--like); color: white; }
         .editor-container { border: 1px solid #ddd; border-radius: 6px; overflow: hidden; margin-top: 5px; }
@@ -35,6 +36,17 @@
         .search-container { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
         .search-container select { width: 120px; margin-top: 0; }
         .search-container input { margin-top: 0; flex: 1; }
+
+        /* 랜덤 포스트 바 스타일 */
+        .random-container { background: #f6f0ff; border: 1px solid #e0d2f7; padding: 12px 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
+        .random-container .random-label { font-weight: bold; color: var(--random); font-size: 14px; white-space: nowrap; }
+        .random-container select { width: 140px; margin-top: 0; }
+        .random-container .random-count { font-size: 12px; color: #888; margin-left: auto; white-space: nowrap; }
+
+        /* 글 없음 안내 페이지 스타일 */
+        #notfound-page { text-align: center; padding: 60px 0; }
+        #notfound-page h1 { margin: 0 0 12px 0; }
+        #notfound-page h5 { margin: 0 0 30px 0; color: #999; font-weight: normal; }
 
         /* 에디터 스타일 */
         .editor-container { border: 1px solid #ddd; border-radius: 6px; overflow: hidden; margin-top: 5px; }
@@ -245,6 +257,24 @@
                     <button class="btn btn-secondary" onclick="resetSearch()">초기화</button>
                 </div>
 
+                <!-- 랜덤 포스트 보기 -->
+                <div class="random-container">
+                    <span class="random-label">🎲 랜덤 포스트 보기</span>
+                    <select id="random-category" onchange="updateRandomCount()">
+                        <option value="all">전체</option>
+                        <option value="코딩">코딩</option>
+                        <option value="글쓰기">글쓰기</option>
+                        <option value="일기">일기</option>
+                        <option value="수상 내역">수상 내역</option>
+                        <option value="독서록">독서록</option>
+                        <option value="개발">개발</option>
+                        <option value="공부/숙제">공부/숙제</option>
+                        <option value="문제 제작">문제 제작</option>
+                    </select>
+                    <button class="btn btn-random" onclick="viewRandomPost()">랜덤으로 뽑기</button>
+                    <span id="random-count" class="random-count"></span>
+                </div>
+
                 <table>
                     <thead><tr><th>유형</th><th>카테고리</th><th>제목</th><th>작성자</th><th>좋아요</th><th>날짜</th></tr></thead>
                     <tbody id="post-list"></tbody>
@@ -329,6 +359,7 @@
 
                 <div style="margin-top: 40px; border-top: 1px solid #eee; padding-top: 20px; display: flex; gap: 10px;">
                     <button class="btn btn-secondary" onclick="showListPage()">목록으로</button>
+                    <button class="btn btn-random" onclick="viewRandomPost()">🎲 다른 랜덤 글</button>
                     <button class="btn btn-success hidden" id="edit-btn" onclick="prepareEdit()">수정</button>
                     <button class="btn btn-danger hidden" id="delete-btn" onclick="deletePost()">삭제</button>
                 </div>
@@ -397,6 +428,13 @@
 
                 <!-- 페이지네이션 컨트롤 (이동 버튼은 아래 유지) -->
                 <div id="rank-pagination" class="pagination"></div>
+            </div>
+
+            <!-- 6. 글 없음 안내 페이지 -->
+            <div id="notfound-page" class="hidden">
+                <h1>해당되는 글을 찾을 수 없어요</h1>
+                <h5>이 글은 아직 등록되지 않았거나 삭제되었을 수 있어요</h5>
+                <button class="btn btn-secondary" onclick="showListPage()">목록으로</button>
             </div>
         </div>
     </div>
@@ -503,6 +541,42 @@
     function resetSearch() {
         document.getElementById('search-input').value = '';
         applyFilters(1);
+    }
+
+    // --- 랜덤 포스트 보기 ---
+    let lastRandomPostId = null; // 직전에 뽑힌 글 id (연속으로 같은 글이 나오지 않게 함)
+
+    // 선택한 카테고리에 현재 존재하는 글만 후보로 모음 ('all'이면 전체)
+    function getRandomCandidates() {
+        const category = document.getElementById('random-category').value;
+        return category === 'all' ? posts : posts.filter(p => p.category === category);
+    }
+
+    // 후보 글 개수 표시 갱신
+    function updateRandomCount() {
+        const el = document.getElementById('random-count');
+        if(!el) return;
+        el.textContent = `뽑을 수 있는 글: ${getRandomCandidates().length}개`;
+    }
+
+    function viewRandomPost() {
+        let candidates = getRandomCandidates();
+        // 뽑을 글이 없으면 알림창 대신 안내 페이지를 보여줌
+        if(candidates.length === 0) return showNotFoundPage();
+        // 후보가 2개 이상이면 직전에 뽑힌 글은 제외
+        if(candidates.length > 1 && lastRandomPostId !== null) {
+            candidates = candidates.filter(p => p.id !== lastRandomPostId);
+        }
+        const picked = candidates[Math.floor(Math.random() * candidates.length)];
+        lastRandomPostId = picked.id;
+        viewPost(posts.indexOf(picked));
+    }
+
+    // --- 글 없음 안내 페이지 ---
+    function showNotFoundPage(pushUrl = true) {
+        hidePages();
+        document.getElementById('notfound-page').classList.remove('hidden');
+        if(pushUrl) history.pushState(null, '', '/notfound');
     }
 
     // --- 작성자 통계 기능 ---
@@ -718,7 +792,9 @@
             const pid = parseInt(m[1], 10);
             const idx = posts.findIndex(p => p.id === pid);
             if(idx !== -1) viewPost(idx, false);
-            else redirectHome('존재하지 않는 게시글입니다.');
+            else showNotFoundPage(false); // 주소는 그대로 두고 안내 페이지 표시
+        } else if(path === '/notfound' || path === '/notfound/') {
+            showNotFoundPage(false);
         } else if((m = path.match(/^\/user\/(\d+)\/?$/))) {
             const uid = parseInt(m[1], 10);
             const uname = getUsernameForUid(uid);
@@ -741,7 +817,7 @@
     });
 
     function hidePages() { 
-        ['list-page', 'write-page', 'view-page', 'author-page', 'rank-page'].forEach(p => {
+        ['list-page', 'write-page', 'view-page', 'author-page', 'rank-page', 'notfound-page'].forEach(p => {
             const el = document.getElementById(p);
             if(el) el.classList.add('hidden');
         }); 
@@ -754,6 +830,7 @@
         if(pushUrl) history.pushState(null, '', `/?page=${targetPage}`);
         applyFilters(targetPage);
         updateStorageUsageDisplay();
+        updateRandomCount();
     }
 
     let currentListPage = 1; // 현재 목록 페이지 번호
