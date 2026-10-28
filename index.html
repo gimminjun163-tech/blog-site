@@ -957,14 +957,17 @@
         const category = document.getElementById('post-category').value;
 
         if(!title || !content.replace(/<br>|&nbsp;/g, '').trim()) return alert("제목과 내용을 모두 입력하세요.");
-
+        
         if(isEditMode) {
             posts[currentIdx] = { ...posts[currentIdx], title, content, code, codeLang, type, category };
         } else {
             // 새 글은 맨 앞(처음 인덱스)에 추가되어 목록 위쪽에서부터 늘어남
             posts.unshift({ id: getNextPostId(), type, category, title, content, code, codeLang, author: currentUser.id, date: new Date().toLocaleDateString(), likes: [], comments: [] });
         }
-        saveData(); showListPage();
+        saveData(); if (document.getElementById('save-btn').innerText=="등록하기"||doocument.getElementById('save-btn').innerText=="저장하기")
+        {
+            showListPage();
+        }
     }
 
     function viewPost(idx, pushUrl = true) {
